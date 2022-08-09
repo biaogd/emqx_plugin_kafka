@@ -116,12 +116,12 @@ on_client_connack(ConnInfo = #{clientid := ClientId}, Rc, Props, _Env) ->
     {ok, Props}.
 
 on_client_connected(ClientInfo = #{clientid := ClientId}, ConnInfo, _Env) ->
-    io:format("Client(~s) connected, ClientInfo:~n~p~n, ConnInfo:~n~p~n",
-              [ClientId, ClientInfo, ConnInfo]).
+    format_connected(ClientInfo, ConnInfo, ClientId),
+    ?SLOG(warning, #{msg=>"on client connected", clientInfo=>ClientInfo, connInfo => ConnInfo, clientId=> ClientId}).
 
 on_client_disconnected(ClientInfo = #{clientid := ClientId}, ReasonCode, ConnInfo, _Env) ->
-    io:format("Client(~s) disconnected due to ~p, ClientInfo:~n~p~n, ConnInfo:~n~p~n",
-              [ClientId, ReasonCode, ClientInfo, ConnInfo]).
+    format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode),
+    ?SLOG(warning, #{msg=>"on client disconnected", clientInfo=>ClientInfo, connInfo => ConnInfo, reasonCode=> ReasonCode,clientId=> ClientId}).
 
 on_client_authenticate(_ClientInfo = #{clientid := ClientId}, Result, _Env) ->
     io:format("Client(~s) authenticate, Result:~n~p~n", [ClientId, Result]),
@@ -175,7 +175,33 @@ on_message_publish(Message = #message{topic = <<"$SYS/", _/binary>>}, _Env) ->
     {ok, Message};
 
 on_message_publish(Message, _Env) ->
-    io:format("Publish ~s~n", [emqx_message:to_map(Message)]),
+
+    Timestamp = Message#message.timestamp,
+    Payload = Message#message.payload,
+    Username = emqx_message:get_header(username, Message),
+    Topic = Message#message.topic,
+    MsgType = <<"publish">>,
+    From = Message#message.from,
+    Qos = Message#message.qos,
+    Retain = emqx_message:get_flag(retain, Message),
+
+    % compress json string
+    Payload1 = json_minify(Payload),
+    Base64Payload =  base64:encode_to_string(Payload1),
+
+    MsgBody = [
+        {ts, Timestamp},
+        {payload, iolist_to_binary(Base64Payload)},
+        {device_id, Username},
+        {topic, Topic},
+        {action, MsgType},
+        {client_id, From},
+        {qos, Qos},
+        {retain, Retain}
+        ],
+    send_kafka(MsgBody, Username),
+
+
     {ok, Message}.
 
 on_message_dropped(#message{topic = <<"$SYS/", _/binary>>}, _By, _Reason, _Env) ->
@@ -214,3 +240,59 @@ unload() ->
     emqx_hooks:del('message.delivered',   {?MODULE, on_message_delivered}),
     emqx_hooks:del('message.acked',       {?MODULE, on_message_acked}),
     emqx_hooks:del('message.dropped',     {?MODULE, on_message_dropped}).
+
+
+send_kafka(MsgBody, Username) -> 
+    {ok, Mb} = emqx_json:safe_encode(MsgBody),
+    Pl = iolist_to_binary(Mb),
+    brod:produce_cb(client, <<"test">>, hash, Username, Pl, fun(_,_) -> ok end),
+    ok.
+
+format_connected(ClientInfo, ConnInfo, ClientId)->
+    Ts = maps:get(connected_at, ConnInfo),
+    Username = maps:get(username, ClientInfo),
+    Action = <<"connected">>,
+    Keepalive = maps:get(keepalive, ConnInfo),
+    {IpAddr, _Port} = maps:get(peername, ConnInfo),
+    Online = 1,
+    Payload = [
+        {action, Action},
+        {device_id, Username},
+        {keepalive, Keepalive},
+        {ipaddress, iolist_to_binary(ntoa(IpAddr))},
+        {ts, Ts},
+        {client_id, ClientId},
+        {online, Online}
+    ],
+    send_kafka(Payload, Username).
+
+format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode)->
+    Ts = maps:get(connected_at, ConnInfo),
+    Username = maps:get(username, ClientInfo),
+    Action = <<"disconnected">>,
+    Online = 0,
+    Payload = [
+        {action, Action},
+        {device_id, Username},
+        {client_id, ClientId},
+        {reason, ReasonCode},
+        {ts, Ts},
+        {online, Online}
+    ],
+
+    send_kafka(Payload, Username),
+    ok.
+
+ntoa({0, 0, 0, 0, 0, 16#ffff, AB, CD}) ->
+  inet_parse:ntoa({AB bsr 8, AB rem 256, CD bsr 8, CD rem 256});
+ntoa(IP) ->
+  inet_parse:ntoa(IP).
+
+json_minify(Payload)->
+    IsJson = jsx:is_json(Payload),
+    if 
+         IsJson ->
+            jsx:minify(Payload);
+        true ->
+            Payload
+    end.
