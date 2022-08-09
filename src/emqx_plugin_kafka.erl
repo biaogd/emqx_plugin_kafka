@@ -56,8 +56,26 @@
         , on_message_dropped/4
         ]).
 
+kafka_init(_Env) ->
+    ?SLOG(info, "Start to init emqx plugin kafka...... ~n"),
+    % {ok, AddressList}=application:get_env(emqx_plugin_kafka, address_list),
+    % ?SLOG(info, "[KAFKA PLUGIN]KafkaAddressList = ~p~n", [AddressList]),
+    % {ok, KafkaConfig} = application:get_env(emqx_plugin_kafka, kafka_config),
+    % ?SLOG(info,"[KAFKA PLUGIN]KafkaConfig = ~p~n", [KafkaConfig]),
+    % {ok, KafkaTopic} = application:get_env(emqx_plugin_kafka, topic),
+    % ?SLOG(info, "[KAFKA PLUGIN]KafkaTopic = ~s~n", [KafkaTopic]),
+    {ok, _} = application:ensure_all_started(brod),
+    ok = brod:start_client([{"172.17.16.58", 9092}], client),
+    ok = brod:start_producer(client, <<"test">>, []),
+    ?SLOG(info, "Init emqx plugin kafka successfully.....~n"),
+    {M, S, _} = os:timestamp(),
+    Ts = M*1000000+S,
+    ok = brod:produce_sync(client, <<"test">>, 0, <<"key2">>, integer_to_list(Ts)),
+    ok.
+
 %% Called when the plugin application start
 load(Env) ->
+    kafka_init([Env]),
     emqx_hooks:add('client.connect',      {?MODULE, on_client_connect, [Env]}, ?HP_HIGHEST),
     emqx_hooks:add('client.connack',      {?MODULE, on_client_connack, [Env]}, ?HP_HIGHEST),
     emqx_hooks:add('client.connected',    {?MODULE, on_client_connected, [Env]}, ?HP_HIGHEST),
