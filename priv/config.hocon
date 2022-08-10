@@ -1,15 +1,11 @@
 ## This is a demo config in HOCON format
 ## The same format used by EMQX since 5.0
 
-magic_n = 42
-
-emqx_plugin_kafka {
-    kafka_address_list = [
-        {"localhost", 9092}
-    ],
-    kafka_config = [
-        {reconnect_cool_down_seconds, 10},          
-        {query_api_versions, true}
-    ],
-    topic = "aaaaaa",
-}
+kafka_address_list = [
+    {"localhost", 9092}
+]
+kafka_config = [
+    {reconnect_cool_down_seconds, 10},          
+    {query_api_versions, true}
+]
+topic = "test"

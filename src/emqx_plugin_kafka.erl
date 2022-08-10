@@ -38,20 +38,19 @@
         ]).
 
 kafka_init(_Env) ->
-    ?SLOG(info, "Start to init emqx plugin kafka...... ~n"),
-    % {ok, AddressList}=application:get_env(emqx_plugin_kafka, address_list),
-    % ?SLOG(info, "[KAFKA PLUGIN]KafkaAddressList = ~p~n", [AddressList]),
-    % {ok, KafkaConfig} = application:get_env(emqx_plugin_kafka, kafka_config),
-    % ?SLOG(info,"[KAFKA PLUGIN]KafkaConfig = ~p~n", [KafkaConfig]),
-    % {ok, KafkaTopic} = application:get_env(emqx_plugin_kafka, topic),
-    % ?SLOG(info, "[KAFKA PLUGIN]KafkaTopic = ~s~n", [KafkaTopic]),
+    ?SLOG(warning, "Start to init emqx plugin kafka...... ~n"),
     {ok, _} = application:ensure_all_started(brod),
     ok = brod:start_client([{"172.17.16.58", 9092}], client),
-    ok = brod:start_producer(client, <<"test">>, []),
+    brod:start_producer(client, <<"mqttThingProperty">>, []),
+    brod:start_producer(client, <<"mqttThingEvent">>, []),
+    brod:start_producer(client, <<"mqttThingService">>, []),
+    brod:start_producer(client, <<"mqttSystemOta">>, []),
+    brod:start_producer(client, <<"mqttSystemShadow">>, []),
+    brod:start_producer(client, <<"mqttdisconn">>, []),
     ?SLOG(info, "Init emqx plugin kafka successfully.....~n"),
-    {M, S, _} = os:timestamp(),
-    Ts = M*1000000+S,
-    ok = brod:produce_sync(client, <<"test">>, 0, <<"key2">>, integer_to_list(Ts)),
+    % {M, S, _} = os:timestamp(),
+    % Ts = M*1000000+S,
+    % ok = brod:produce_sync(client, <<"test">>, 0, <<"key2">>, integer_to_list(Ts)),
     ok.
 
 %% Called when the plugin application start
@@ -105,11 +104,10 @@ on_message_publish(Message, _Env) ->
 
     % compress json string
     Payload1 = json_minify(Payload),
-    Base64Payload =  base64:encode_to_string(Payload1),
 
     MsgBody = [
         {ts, Timestamp},
-        {payload, iolist_to_binary(Base64Payload)},
+        {payload, Payload1},
         {device_id, Username},
         {topic, Topic},
         {action, MsgType},
@@ -117,9 +115,30 @@ on_message_publish(Message, _Env) ->
         {qos, Qos},
         {retain, Retain}
         ],
-    send_kafka(MsgBody, Username),
+    
+    TopicStr = binary_to_list(Topic),
+    TopicProperty = string:str(TopicStr, "$thing/req/property"),
+    TopicEvent = string:str(TopicStr, "$thing/req/event"),
+    TopicService = string:str(TopicStr, "$thing/up/service"),
+    TopicOta = string:str(TopicStr, "$ota/req"),
+    TopicShadow = string:str(TopicStr, "$shadow/update"),
 
-
+    if 
+        TopicProperty > 0 ->
+            send_kafka(MsgBody, Username, <<"mqttThingProperty">>);
+        TopicEvent > 0 ->
+            send_kafka(MsgBody, Username, <<"mqttThingEvent">>);
+        TopicService > 0 ->
+            send_kafka(MsgBody, Username, <<"mqttThingService">>);
+        TopicOta > 0 ->
+            send_kafka(MsgBody, Username,<<"mqttSystemOta">>);
+        TopicOta > 0 ->
+            send_kafka(MsgBody, Username,<<"mqttSystemOta">>);
+        TopicShadow > 0 ->
+            send_kafka(MsgBody, Username, <<"mqttSystemShadow">>)
+    end,
+    
+    
     {ok, Message}.
 
 %% Called when the plugin application stop
@@ -129,10 +148,12 @@ unload() ->
     emqx_hooks:del('message.publish',     {?MODULE, on_message_publish}).
 
 
-send_kafka(MsgBody, Username) -> 
+send_kafka(MsgBody, Username, KafkaTopic) -> 
     {ok, Mb} = emqx_json:safe_encode(MsgBody),
     Pl = iolist_to_binary(Mb),
-    brod:produce_cb(client, <<"test">>, hash, Username, Pl, fun(_,_) -> ok end),
+    % brod:produce_cb(KafkaClient, KafkaTopic, hash, Username, Pl, fun(_,_) -> ok end),
+    Res = brod:produce_sync(client, KafkaTopic, hash, Username, Pl),
+    ?SLOG(warning, #{msg=>"send kafka ok",res=>Res}),
     ok.
 
 format_connected(ClientInfo, ConnInfo, ClientId)->
@@ -151,7 +172,7 @@ format_connected(ClientInfo, ConnInfo, ClientId)->
         {client_id, ClientId},
         {online, Online}
     ],
-    send_kafka(Payload, Username).
+    send_kafka(Payload, Username, <<"mqttdisconn">>).
 
 format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode)->
     Ts = maps:get(connected_at, ConnInfo),
@@ -167,7 +188,7 @@ format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode)->
         {online, Online}
     ],
 
-    send_kafka(Payload, Username),
+    send_kafka(Payload, Username, <<"mqttdisconn">>),
     ok.
 
 ntoa({0, 0, 0, 0, 0, 16#ffff, AB, CD}) ->
