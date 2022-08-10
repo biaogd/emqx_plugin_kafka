@@ -151,9 +151,9 @@ unload() ->
 send_kafka(MsgBody, Username, KafkaTopic) -> 
     {ok, Mb} = emqx_json:safe_encode(MsgBody),
     Pl = iolist_to_binary(Mb),
-    % brod:produce_cb(KafkaClient, KafkaTopic, hash, Username, Pl, fun(_,_) -> ok end),
-    Res = brod:produce_sync(client, KafkaTopic, hash, Username, Pl),
-    ?SLOG(warning, #{msg=>"send kafka ok",res=>Res}),
+    brod:produce_cb(client, KafkaTopic, hash, Username, Pl, fun(_,_) -> ok end),
+    % Res = brod:produce_sync(client, KafkaTopic, hash, Username, Pl),
+    % ?SLOG(debug, #{msg=>"send kafka ok",res=>Res}),
     ok.
 
 format_connected(ClientInfo, ConnInfo, ClientId)->
@@ -162,6 +162,7 @@ format_connected(ClientInfo, ConnInfo, ClientId)->
     Action = <<"connected">>,
     Keepalive = maps:get(keepalive, ConnInfo),
     {IpAddr, _Port} = maps:get(peername, ConnInfo),
+    IsSuperuser = maps:get(is_superuser, ClientInfo),
     Online = 1,
     Payload = [
         {action, Action},
@@ -172,12 +173,16 @@ format_connected(ClientInfo, ConnInfo, ClientId)->
         {client_id, ClientId},
         {online, Online}
     ],
-    send_kafka(Payload, Username, <<"mqttdisconn">>).
+    if
+        not IsSuperuser ->
+            send_kafka(Payload, Username, <<"mqttdisconn">>)
+    end.
 
 format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode)->
     Ts = maps:get(connected_at, ConnInfo),
     Username = maps:get(username, ClientInfo),
     Action = <<"disconnected">>,
+    IsSuperuser = maps:get(is_superuser, ClientInfo),
     Online = 0,
     Payload = [
         {action, Action},
@@ -187,9 +192,10 @@ format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode)->
         {ts, Ts},
         {online, Online}
     ],
-
-    send_kafka(Payload, Username, <<"mqttdisconn">>),
-    ok.
+    if 
+        not IsSuperuser ->
+            send_kafka(Payload, Username, <<"mqttdisconn">>)
+    end.
 
 ntoa({0, 0, 0, 0, 0, 16#ffff, AB, CD}) ->
   inet_parse:ntoa({AB bsr 8, AB rem 256, CD bsr 8, CD rem 256});
