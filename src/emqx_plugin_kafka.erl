@@ -101,11 +101,13 @@ on_message_publish(Message, _Env) ->
     From = Message#message.from,
     Qos = Message#message.qos,
     Retain = emqx_message:get_flag(retain, Message),
+    MsgId = Message#message.id,
 
     % compress json string
     Payload1 = json_minify(Payload),
 
     MsgBody = [
+        {msg_id, binary:encode_hex(MsgId)},
         {ts, Timestamp},
         {payload, Payload1},
         {device_id, Username},
