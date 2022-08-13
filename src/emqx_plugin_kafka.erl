@@ -137,7 +137,8 @@ on_message_publish(Message, _Env) ->
         TopicOta > 0 ->
             send_kafka(MsgBody, Username,<<"mqttSystemOta">>);
         TopicShadow > 0 ->
-            send_kafka(MsgBody, Username, <<"mqttSystemShadow">>)
+            send_kafka(MsgBody, Username, <<"mqttSystemShadow">>);
+        true -> true
     end,
     
     
@@ -177,7 +178,8 @@ format_connected(ClientInfo, ConnInfo, ClientId)->
     ],
     if
         not IsSuperuser ->
-            send_kafka(Payload, Username, <<"mqttdisconn">>)
+            send_kafka(Payload, Username, <<"mqttdisconn">>);
+        true -> ok
     end.
 
 format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode)->
@@ -196,7 +198,8 @@ format_disconnected(ClientInfo, ConnInfo, ClientId, ReasonCode)->
     ],
     if 
         not IsSuperuser ->
-            send_kafka(Payload, Username, <<"mqttdisconn">>)
+            send_kafka(Payload, Username, <<"mqttdisconn">>);
+        true -> ok
     end.
 
 ntoa({0, 0, 0, 0, 0, 16#ffff, AB, CD}) ->
