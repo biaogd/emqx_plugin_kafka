@@ -40,13 +40,14 @@
 kafka_init(_Env) ->
     ?SLOG(warning, "Start to init emqx plugin kafka...... ~n"),
     {ok, _} = application:ensure_all_started(brod),
-    ok = brod:start_client([{"172.17.16.58", 9092}], client),
+    ok = brod:start_client([{"kafka-cluster", 9092}], client),
     brod:start_producer(client, <<"mqttThingProperty">>, []),
     brod:start_producer(client, <<"mqttThingEvent">>, []),
     brod:start_producer(client, <<"mqttThingService">>, []),
     brod:start_producer(client, <<"mqttSystemOta">>, []),
     brod:start_producer(client, <<"mqttSystemShadow">>, []),
     brod:start_producer(client, <<"mqttdisconn">>, []),
+    brod:start_producer(client, <<"mqttMessagePush">>, []),
     ?SLOG(info, "Init emqx plugin kafka successfully.....~n"),
     % {M, S, _} = os:timestamp(),
     % Ts = M*1000000+S,
@@ -124,6 +125,7 @@ on_message_publish(Message, _Env) ->
     TopicService = string:str(TopicStr, "$thing/up/service"),
     TopicOta = string:str(TopicStr, "$ota/req"),
     TopicShadow = string:str(TopicStr, "$shadow/update"),
+    TopicPush = string:str(TopicStr, "$push/up"),
 
     if 
         TopicProperty > 0 ->
@@ -138,6 +140,8 @@ on_message_publish(Message, _Env) ->
             send_kafka(MsgBody, Username,<<"mqttSystemOta">>);
         TopicShadow > 0 ->
             send_kafka(MsgBody, Username, <<"mqttSystemShadow">>);
+        TopicPush > 0 ->
+            send_kafka(MsgBody, Username, <<"mqttMessagePush">>);
         true -> true
     end,
     
